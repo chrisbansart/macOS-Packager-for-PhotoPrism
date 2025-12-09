@@ -31,29 +31,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Output format options (can be overridden via environment or arguments)
 BUILD_PKG="${BUILD_PKG:-1}"
 BUILD_DMG="${BUILD_DMG:-1}"
+BUILD_APP_ONLY="${BUILD_APP_ONLY:-0}"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --app-only)
+      BUILD_PKG=0
+      BUILD_DMG=0
+      BUILD_APP_ONLY=1
+      shift
+      ;;
     --pkg-only)
       BUILD_PKG=1
       BUILD_DMG=0
+      BUILD_APP_ONLY=0
       shift
       ;;
     --dmg-only)
       BUILD_PKG=0
       BUILD_DMG=1
+      BUILD_APP_ONLY=0
       shift
       ;;
     --both)
       BUILD_PKG=1
       BUILD_DMG=1
+      BUILD_APP_ONLY=0
       shift
       ;;
     --help|-h)
       echo "Usage: $0 [OPTIONS]"
       echo
       echo "Options:"
+      echo "  --app-only    Build only the .app bundle in dist/ (no .pkg or .dmg)"
       echo "  --pkg-only    Build only the .pkg installer"
       echo "  --dmg-only    Build only the .dmg disk image"
       echo "  --both        Build both .pkg and .dmg (default)"
@@ -62,6 +73,7 @@ while [[ $# -gt 0 ]]; do
       echo "Environment variables:"
       echo "  BUILD_PKG=0|1          Enable/disable .pkg build (default: 1)"
       echo "  BUILD_DMG=0|1          Enable/disable .dmg build (default: 1)"
+      echo "  BUILD_APP_ONLY=0|1     Build only .app bundle (default: 0)"
       echo "  PHOTOPRISM_REF=<ref>   Git reference to build (default: latest)"
       echo "  TF_VERSION=<version>   TensorFlow version (default: 2.18.0)"
       echo "  ONNX_VERSION=<version> ONNX Runtime version (default: 1.22.0)"
@@ -77,8 +89,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate at least one output format is selected
-if [[ "$BUILD_PKG" != "1" && "$BUILD_DMG" != "1" ]]; then
-  echo "!! Error: At least one output format must be selected (--pkg-only, --dmg-only, or --both)"
+if [[ "$BUILD_PKG" != "1" && "$BUILD_DMG" != "1" && "$BUILD_APP_ONLY" != "1" ]]; then
+  echo "!! Error: At least one output format must be selected (--app-only, --pkg-only, --dmg-only, or --both)"
   exit 1
 fi
 
@@ -99,8 +111,12 @@ DIST_DIR="$SCRIPT_DIR/dist"
 LAUNCHER_SRC="${LAUNCHER_SRC:-$SCRIPT_DIR/PhotoPrismLauncher}"
 
 echo ">> Build configuration:"
-echo "   PKG: $([ "$BUILD_PKG" = "1" ] && echo "Yes" || echo "No")"
-echo "   DMG: $([ "$BUILD_DMG" = "1" ] && echo "Yes" || echo "No")"
+if [[ "$BUILD_APP_ONLY" == "1" ]]; then
+  echo "   Mode: App bundle only"
+else
+  echo "   PKG: $([ "$BUILD_PKG" = "1" ] && echo "Yes" || echo "No")"
+  echo "   DMG: $([ "$BUILD_DMG" = "1" ] && echo "Yes" || echo "No")"
+fi
 echo
 
 ### --------------------------------------------------------------------
@@ -576,6 +592,18 @@ echo ">> Ad-hoc signing..."
 codesign --force --deep --sign - "$APP_DIR"
 
 ### --------------------------------------------------------------------
+### Copy .app to dist/ (for --app-only mode)
+### --------------------------------------------------------------------
+
+if [[ "$BUILD_APP_ONLY" == "1" ]]; then
+  echo ">> Copying app to dist/..."
+  DIST_APP_PATH="$DIST_DIR/$APP_NAME"
+  rm -rf "$DIST_APP_PATH"
+  cp -R "$APP_DIR" "$DIST_APP_PATH"
+  echo "   App copied: $DIST_APP_PATH"
+fi
+
+### --------------------------------------------------------------------
 ### Create .pkg installer
 ### --------------------------------------------------------------------
 
@@ -728,21 +756,28 @@ echo "==============================================="
 echo "Build complete!"
 echo
 
-if [[ "$BUILD_PKG" == "1" || "$BUILD_DMG" == "1" ]]; then
+if [[ "$BUILD_APP_ONLY" == "1" ]]; then
+  echo "Application bundle:"
+  echo "  App: $DIST_DIR/$APP_NAME"
+  echo
+  echo "To use:"
+  echo "  - Copy to /Applications manually"
+  echo "  - Or double-click to run from $DIST_DIR"
+elif [[ "$BUILD_PKG" == "1" || "$BUILD_DMG" == "1" ]]; then
   echo "Installers:"
   [[ -n "$PKG_PATH" ]] && echo "  PKG: $PKG_PATH"
   [[ -n "$DMG_PATH" ]] && echo "  DMG: $DMG_PATH"
   echo
+  echo "Installation:"
+  [[ "$BUILD_PKG" == "1" ]] && echo "  PKG: Double-click to run installer"
+  [[ "$BUILD_DMG" == "1" ]] && echo "  DMG: Open and drag PhotoPrism to Applications"
 fi
 
+echo
 echo "Minimum macOS version: ${MIN_MACOS_VERSION}"
 echo
 echo "Temp folder: $TEMP_DIR"
 echo "Dist folder: $DIST_DIR"
-echo
-echo "Installation:"
-[[ "$BUILD_PKG" == "1" ]] && echo "  PKG: Double-click to run installer"
-[[ "$BUILD_DMG" == "1" ]] && echo "  DMG: Open and drag PhotoPrism to Applications"
 echo
 echo "Default login: admin / photoprism"
 echo "==============================================="

@@ -55,7 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         viewController = PhotoPrismViewController()
         
         mainWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 450),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -483,6 +483,7 @@ class PhotoPrismViewController: NSViewController {
     private var showLogsButton: NSButton!
     private var openPicturesFolderButton: NSButton!
     private var openDataFolderButton: NSButton!
+    private var migrateLibraryButton: NSButton!
     
     // Paths (computed from preferences)
     private var appSupportPath: URL {
@@ -504,7 +505,7 @@ class PhotoPrismViewController: NSViewController {
     }
     
     override func loadView() {
-        self.view = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 400))
+        self.view = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 450))
     }
     
     override func viewDidLoad() {
@@ -589,7 +590,10 @@ class PhotoPrismViewController: NSViewController {
         
         openDataFolderButton = createButton(title: "Open Data Folder", action: #selector(openDataFolder))
         view.addSubview(openDataFolderButton)
-        
+
+        migrateLibraryButton = createButton(title: "Migrate iPhoto Library", action: #selector(migrateLibrary))
+        view.addSubview(migrateLibraryButton)
+
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 25),
             titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -632,6 +636,10 @@ class PhotoPrismViewController: NSViewController {
             openDataFolderButton.topAnchor.constraint(equalTo: openPicturesFolderButton.bottomAnchor, constant: 10),
             openDataFolderButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             openDataFolderButton.widthAnchor.constraint(equalToConstant: 200),
+
+            migrateLibraryButton.topAnchor.constraint(equalTo: openDataFolderButton.bottomAnchor, constant: 10),
+            migrateLibraryButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            migrateLibraryButton.widthAnchor.constraint(equalToConstant: 200),
         ])
     }
     
@@ -803,7 +811,12 @@ func stopServer() {
     @objc private func openDataFolder() {
         NSWorkspace.shared.open(appSupportPath)
     }
-    
+
+    @objc private func migrateLibrary() {
+        let migrator = PhotoLibraryMigrator(importPath: picturesPath.appendingPathComponent("import").path)
+        migrator.showMigrationDialog(parentWindow: view.window)
+    }
+
     private func showAlert(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
@@ -811,5 +824,251 @@ func stopServer() {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+}
+
+// MARK: - PhotoLibraryMigrator
+class PhotoLibraryMigrator {
+    private let importPath: String
+    private var progressWindow: NSWindow?
+    private var progressIndicator: NSProgressIndicator?
+    private var statusLabel: NSTextField?
+
+    init(importPath: String) {
+        self.importPath = importPath
+    }
+
+    func showMigrationDialog(parentWindow: NSWindow?) {
+        let alert = NSAlert()
+        alert.messageText = "Migrate iPhoto/Photos Library"
+        alert.informativeText = "This will export your photos from the selected library to PhotoPrism, preserving originals, edited versions (as stacks), and albums.\n\nMake sure osxphotos is installed:\npip3 install osxphotos"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Select Library")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        selectLibraryAndMigrate()
+    }
+
+    private func selectLibraryAndMigrate() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.package]
+        panel.message = "Select your Photos or iPhoto library"
+        panel.prompt = "Select"
+
+        // Set default path if it exists
+        let defaultPath = NSHomeDirectory() + "/Pictures/Test.photoslibrary"
+        if FileManager.default.fileExists(atPath: defaultPath) {
+            panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/Pictures")
+        }
+
+        if panel.runModal() == .OK, let libraryURL = panel.url {
+            performMigration(libraryPath: libraryURL.path)
+        }
+    }
+
+    private func findOSXPhotos() -> String? {
+        // List of potential locations for osxphotos
+        let possiblePaths = [
+            "osxphotos"
+        ]
+
+        // Check each path
+        for path in possiblePaths {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+
+        // Try to find it using 'which' command
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        task.arguments = ["osxphotos"]
+
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+
+            if task.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !output.isEmpty {
+                    return output
+                }
+            }
+        } catch {
+            print("Failed to run 'which' command: \(error)")
+        }
+
+        return nil
+    }
+
+    private func performMigration(libraryPath: String) {
+        // Create progress window
+        showProgressWindow()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            self.updateStatus("Starting migration...")
+
+            // Find osxphotos executable
+            guard let osxphotosPath = self.findOSXPhotos() else {
+                DispatchQueue.main.async {
+                    self.showCompletionAlert(success: false, message: "osxphotos not found. Please install it:\n\npip3 install osxphotos\n\nOr using Homebrew:\nbrew install osxphotos")
+                    self.closeProgressWindow()
+                }
+                return
+            }
+
+            self.updateStatus("Found osxphotos at: \(osxphotosPath)")
+
+            // Build osxphotos export command
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: osxphotosPath)
+
+            // Arguments for osxphotos export
+            var arguments = [
+                "export",
+                self.importPath,
+                "--db", libraryPath,
+                "--export-by-date",  // Organize by date
+                "--directory", "{created.year}/{created.month}",
+                "--edited",  // Export edited versions
+                "--original-name",  // Use original filename
+                "--keep-originals",  // Keep originals when edited versions exist
+                "--use-photokit",  // Use PhotoKit for better compatibility
+                "--update",  // Update existing files
+                "--album-keyword",  // Add album names as keywords (PhotoPrism will use these)
+                "--exiftool",  // Use exiftool to write keywords to EXIF
+                "--sidecar", "xmp",  // Create XMP sidecar files with metadata
+                "--verbose"
+            ]
+
+            task.arguments = arguments
+
+            // Capture output
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            task.standardOutput = outputPipe
+            task.standardError = errorPipe
+
+            // Read output in real-time
+            outputPipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if let output = String(data: data, encoding: .utf8), !output.isEmpty {
+                    DispatchQueue.main.async {
+                        self.updateStatus(output.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                }
+            }
+
+            errorPipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if let output = String(data: data, encoding: .utf8), !output.isEmpty {
+                    print("Error: \(output)")
+                }
+            }
+
+            do {
+                try task.run()
+                task.waitUntilExit()
+
+                // Clean up handlers
+                outputPipe.fileHandleForReading.readabilityHandler = nil
+                errorPipe.fileHandleForReading.readabilityHandler = nil
+
+                DispatchQueue.main.async {
+                    if task.terminationStatus == 0 {
+                        self.showCompletionAlert(success: true, message: "Migration completed successfully!")
+                    } else {
+                        self.showCompletionAlert(success: false, message: "Migration failed with error code \(task.terminationStatus)")
+                    }
+                    self.closeProgressWindow()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.showCompletionAlert(success: false, message: "Failed to start migration: \(error.localizedDescription)")
+                    self.closeProgressWindow()
+                }
+            }
+        }
+    }
+
+    private func showProgressWindow() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 500, height: 150),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Migrating Photo Library"
+            window.isReleasedWhenClosed = false
+
+            let contentView = NSView(frame: window.contentView!.bounds)
+
+            let titleLabel = NSTextField(labelWithString: "Migrating photos to PhotoPrism...")
+            titleLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+            titleLabel.frame = NSRect(x: 20, y: 100, width: 460, height: 20)
+            contentView.addSubview(titleLabel)
+
+            let progressIndicator = NSProgressIndicator()
+            progressIndicator.style = .bar
+            progressIndicator.isIndeterminate = true
+            progressIndicator.frame = NSRect(x: 20, y: 70, width: 460, height: 20)
+            progressIndicator.startAnimation(nil)
+            contentView.addSubview(progressIndicator)
+            self.progressIndicator = progressIndicator
+
+            let statusLabel = NSTextField(labelWithString: "Initializing...")
+            statusLabel.font = NSFont.systemFont(ofSize: 11)
+            statusLabel.textColor = NSColor.secondaryLabelColor
+            statusLabel.frame = NSRect(x: 20, y: 20, width: 460, height: 40)
+            statusLabel.lineBreakMode = .byTruncatingTail
+            contentView.addSubview(statusLabel)
+            self.statusLabel = statusLabel
+
+            window.contentView = contentView
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+
+            self.progressWindow = window
+        }
+    }
+
+    private func updateStatus(_ status: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.statusLabel?.stringValue = status
+        }
+    }
+
+    private func closeProgressWindow() {
+        DispatchQueue.main.async { [weak self] in
+            self?.progressWindow?.close()
+            self?.progressWindow = nil
+        }
+    }
+
+    private func showCompletionAlert(success: Bool, message: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = success ? "Migration Complete" : "Migration Failed"
+            alert.informativeText = message
+            alert.alertStyle = success ? .informational : .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
 }
