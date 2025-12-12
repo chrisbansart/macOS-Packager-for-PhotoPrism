@@ -363,7 +363,7 @@ if [[ "$INSTALL_ONNX" == "1" ]]; then
   ONNX_DIR="onnxruntime-osx-arm64-${ONNX_VERSION}"
   ONNX_TARBALL="${ONNX_DIR}.tgz"
   ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/${ONNX_TARBALL}"
-  
+
   if [[ ! -d "$TEMP_DIR/$ONNX_DIR" ]]; then
     echo ">> Downloading ONNX Runtime $ONNX_VERSION..."
     curl -fSL "$ONNX_URL" -o "$TEMP_DIR/$ONNX_TARBALL"
@@ -373,6 +373,36 @@ if [[ "$INSTALL_ONNX" == "1" ]]; then
     echo ">> ONNX Runtime already downloaded."
   fi
   ONNX_DEST="$TEMP_DIR/$ONNX_DIR"
+fi
+
+### --------------------------------------------------------------------
+### Download ExifTool
+### --------------------------------------------------------------------
+
+EXIFTOOL_VERSION="${EXIFTOOL_VERSION:-13.43}"
+EXIFTOOL_DEST="$TEMP_DIR/exiftool"
+
+if [[ ! -f "$EXIFTOOL_DEST/exiftool" ]]; then
+  echo ">> Downloading ExifTool $EXIFTOOL_VERSION..."
+  EXIFTOOL_TARBALL="Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz"
+  EXIFTOOL_URL="https://sourceforge.net/projects/exiftool/files/${EXIFTOOL_TARBALL}/download"
+
+  mkdir -p "$EXIFTOOL_DEST"
+  curl -fSL "$EXIFTOOL_URL" -o "$TEMP_DIR/$EXIFTOOL_TARBALL"
+  tar -xzf "$TEMP_DIR/$EXIFTOOL_TARBALL" -C "$TEMP_DIR"
+
+  EXIFTOOL_EXTRACTED="$TEMP_DIR/Image-ExifTool-${EXIFTOOL_VERSION}"
+
+  # Copy the exiftool script and lib directory
+  cp "$EXIFTOOL_EXTRACTED/exiftool" "$EXIFTOOL_DEST/"
+  cp -R "$EXIFTOOL_EXTRACTED/lib" "$EXIFTOOL_DEST/"
+  chmod +x "$EXIFTOOL_DEST/exiftool"
+
+  rm -f "$TEMP_DIR/$EXIFTOOL_TARBALL"
+  rm -rf "$EXIFTOOL_EXTRACTED"
+  echo "   ExifTool installed to: $EXIFTOOL_DEST"
+else
+  echo ">> ExifTool already downloaded."
 fi
 
 ### --------------------------------------------------------------------
@@ -450,6 +480,15 @@ mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_FRAMEWORKS"
 cp "$LAUNCHER_BUILD/PhotoPrism" "$APP_MACOS/"
 cp "$TEMP_DIR/photoprism/photoprism" "$APP_MACOS/photoprism-server"
 chmod +x "$APP_MACOS/PhotoPrism" "$APP_MACOS/photoprism-server"
+
+# Copy ExifTool
+if [[ -f "$EXIFTOOL_DEST/exiftool" ]]; then
+  echo ">> Copying ExifTool to bundle..."
+  cp "$EXIFTOOL_DEST/exiftool" "$APP_MACOS/"
+  cp -R "$EXIFTOOL_DEST/lib" "$APP_MACOS/"
+  chmod +x "$APP_MACOS/exiftool"
+  echo "   ExifTool added to bundle"
+fi
 
 # Assets
 [[ -d "$TEMP_DIR/photoprism/assets" ]] && cp -R "$TEMP_DIR/photoprism/assets" "$APP_RESOURCES/"
