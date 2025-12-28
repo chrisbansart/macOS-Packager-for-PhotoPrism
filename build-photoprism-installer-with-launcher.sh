@@ -406,6 +406,45 @@ else
 fi
 
 ### --------------------------------------------------------------------
+### Download FFmpeg
+### --------------------------------------------------------------------
+
+FFMPEG_VERSION="${FFMPEG_VERSION:-7.1}"
+FFMPEG_DEST="$TEMP_DIR/ffmpeg"
+
+if [[ ! -f "$FFMPEG_DEST/ffmpeg" ]]; then
+  echo ">> Downloading FFmpeg $FFMPEG_VERSION for macOS ARM64..."
+
+  # FFmpeg static build for macOS ARM64
+  # Using evermeet.cx builds which are well-maintained for macOS
+  FFMPEG_URL="https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"
+  FFPROBE_URL="https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip"
+
+  mkdir -p "$FFMPEG_DEST"
+
+  # Download ffmpeg
+  echo "   Downloading ffmpeg binary..."
+  curl -fSL "$FFMPEG_URL" -o "$TEMP_DIR/ffmpeg.zip"
+  unzip -q "$TEMP_DIR/ffmpeg.zip" -d "$FFMPEG_DEST"
+  chmod +x "$FFMPEG_DEST/ffmpeg"
+
+  # Download ffprobe
+  echo "   Downloading ffprobe binary..."
+  curl -fSL "$FFPROBE_URL" -o "$TEMP_DIR/ffprobe.zip"
+  unzip -q "$TEMP_DIR/ffprobe.zip" -d "$FFMPEG_DEST"
+  chmod +x "$FFMPEG_DEST/ffprobe"
+
+  # Cleanup
+  rm -f "$TEMP_DIR/ffmpeg.zip" "$TEMP_DIR/ffprobe.zip"
+
+  echo "   FFmpeg installed to: $FFMPEG_DEST"
+  echo "   FFmpeg version:"
+  "$FFMPEG_DEST/ffmpeg" -version | head -1
+else
+  echo ">> FFmpeg already downloaded."
+fi
+
+### --------------------------------------------------------------------
 ### Build PhotoPrism
 ### --------------------------------------------------------------------
 
@@ -488,6 +527,15 @@ if [[ -f "$EXIFTOOL_DEST/exiftool" ]]; then
   cp -R "$EXIFTOOL_DEST/lib" "$APP_MACOS/"
   chmod +x "$APP_MACOS/exiftool"
   echo "   ExifTool added to bundle"
+fi
+
+# Copy FFmpeg
+if [[ -f "$FFMPEG_DEST/ffmpeg" ]]; then
+  echo ">> Copying FFmpeg to bundle..."
+  cp "$FFMPEG_DEST/ffmpeg" "$APP_MACOS/"
+  cp "$FFMPEG_DEST/ffprobe" "$APP_MACOS/"
+  chmod +x "$APP_MACOS/ffmpeg" "$APP_MACOS/ffprobe"
+  echo "   FFmpeg and FFprobe added to bundle"
 fi
 
 # Assets

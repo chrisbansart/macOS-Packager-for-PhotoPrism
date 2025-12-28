@@ -13,6 +13,7 @@
   - **Open Data Folder**: Access to application data (cache, database, etc.)
   - **Preferences**: Configure custom folders and auto-start options
   - **Official PhotoPrism icon**: Uses the official PhotoPrism logo
+  - **Complete bundle**: Includes FFmpeg for video processing, ExifTool for metadata extraction
 
   ## Project Structure
 
@@ -46,6 +47,8 @@ The script automatically:
 
 - Checks for required dependencies (Homebrew, Xcode SDK, etc.)
 - Downloads TensorFlow and ONNX Runtime libraries
+- Downloads FFmpeg and FFprobe (video processing)
+- Downloads ExifTool (metadata extraction)
 - Clones and compiles PhotoPrism
 - Downloads the official PhotoPrism logo and generates icons
 - Builds the native Swift launcher
@@ -126,7 +129,11 @@ PhotoPrism.app/
     ├── PkgInfo
     ├── MacOS/
     │   ├── PhotoPrism           # Swift launcher (main executable)
-    │   └── photoprism-server    # PhotoPrism server binary
+    │   ├── photoprism-server    # PhotoPrism server binary
+    │   ├── ffmpeg               # FFmpeg video processor
+    │   ├── ffprobe              # FFprobe metadata reader
+    │   ├── exiftool             # ExifTool metadata extractor
+    │   └── lib/                 # ExifTool libraries
     ├── Resources/
     │   ├── AppIcon.icns         # Application icon
     │   └── assets/              # PhotoPrism web assets
