@@ -165,11 +165,54 @@ Add entries to the `environment` dictionary in the `startServer()` function in `
 
 ## Troubleshooting
 
+### Port 2342 already in use
+
+**New Feature**: The launcher now automatically detects if port 2342 is in use and offers options:
+- **Stop Existing Process**: Automatically kills the existing process and starts fresh
+- **Open Existing Server**: Simply opens the browser to the existing server
+- **Cancel**: Cancels the operation
+
+### Application shutdown guarantees
+
+**New Feature**: The application uses a 4-stage progressive shutdown system to ensure all PhotoPrism processes terminate properly when you:
+- Quit the application (⌘Q)
+- Click "Stop Server"
+
+The 4 stages are:
+1. Graceful shutdown via `photoprism stop`
+2. SIGTERM to process group
+3. SIGKILL to process group
+4. Nuclear option (kill by port + name)
+
+After quitting, verify no processes remain:
+```bash
+ps aux | grep photoprism | grep -v grep  # Should be empty
+lsof -i :2342                            # Should be empty
+```
+
+### Manual process management
+
+Use the helper script for interactive process management:
+```bash
+./scripts/kill-photoprism.sh
+```
+
+Or use the nuclear option one-liner:
+```bash
+(lsof -ti :2342 | xargs kill -9 2>/dev/null; pkill -9 -i photoprism 2>/dev/null) && echo "✓ Done"
+```
+
 ### Server won't start
 
 - Check logs: Click "Show Logs" button
 - Verify folders exist and are writable
-- Ensure no other process is using port 2342
+- See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for detailed solutions
+
+### Technical documentation
+
+- **Process Management**: See [PROCESS_MANAGEMENT.md](PROCESS_MANAGEMENT.md) for technical details on the shutdown system
+- **FFmpeg Integration**: See [FFMPEG_INTEGRATION.md](FFMPEG_INTEGRATION.md) for video processing details
+- **Live Photos**: See [LIVE_PHOTOS.md](LIVE_PHOTOS.md) for Apple Live Photos and Android Motion Photos support
 
 ### Build fails with SDK error
 
@@ -180,6 +223,8 @@ Add entries to the `environment` dictionary in the `startServer()` function in `
 
 - The build script bundles all required dylibs
 - Check `Contents/Frameworks/` in the app bundle
+
+For more issues, see the comprehensive [Troubleshooting Guide](TROUBLESHOOTING.md).
 
 ## License
 

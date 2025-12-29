@@ -671,12 +671,129 @@ class PhotoPrismViewController: NSViewController {
         return Bundle.main.resourceURL?.appendingPathComponent("assets")
     }
     
+    // Check if port 2342 is already in use
+    private func isPortInUse(_ port: Int = 2342) -> Bool {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        task.arguments = ["-i", ":\(port)", "-sTCP:LISTEN"]
+
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        // Don't capture stderr to avoid false positives from lsof warnings
+        task.standardError = nil
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+
+            // Filter out header line and empty lines
+            // Only count actual process lines (not warnings, not headers)
+            let processLines = output.components(separatedBy: .newlines).filter { line in
+                !line.isEmpty &&
+                !line.hasPrefix("COMMAND") &&  // Skip header
+                !line.hasPrefix("lsof:") &&    // Skip lsof warnings
+                !line.contains("WARNING")       // Skip warning lines
+            }
+
+            return processLines.count > 0 // Port is in use if there are actual process lines
+        } catch {
+            return false
+        }
+    }
+
+    // Kill any PhotoPrism processes using port 2342
+    private func killExistingPhotoprismProcesses() -> Bool {
+        // Strategy 1: Kill by port (most reliable for our use case)
+        let portTask = Process()
+        portTask.executableURL = URL(fileURLWithPath: "/bin/sh")
+        portTask.arguments = ["-c", "lsof -ti :2342 | xargs kill -9 2>/dev/null"]
+
+        do {
+            try portTask.run()
+            portTask.waitUntilExit()
+        } catch {
+            // Ignore errors, try next strategy
+        }
+
+        // Strategy 2: Kill by process name (case insensitive)
+        let nameTask = Process()
+        nameTask.executableURL = URL(fileURLWithPath: "/bin/sh")
+        nameTask.arguments = ["-c", "pkill -9 -i photoprism 2>/dev/null"]
+
+        do {
+            try nameTask.run()
+            nameTask.waitUntilExit()
+        } catch {
+            // Ignore errors, try next strategy
+        }
+
+        // Strategy 3: Kill photoprism-server specifically
+        let serverTask = Process()
+        serverTask.executableURL = URL(fileURLWithPath: "/bin/sh")
+        serverTask.arguments = ["-c", "pkill -9 -i photoprism-server 2>/dev/null"]
+
+        do {
+            try serverTask.run()
+            serverTask.waitUntilExit()
+        } catch {
+            // Ignore errors
+        }
+
+        // Wait for processes to terminate
+        Thread.sleep(forTimeInterval: 1.5)
+
+        // Verify port is now free
+        return !isPortInUse(2342)
+    }
+
     func startServer() {
         guard !isServerRunning else { return }
-        
+
+        // Check if port 2342 is already in use
+        if isPortInUse(2342) {
+            let alert = NSAlert()
+            alert.messageText = "Port 2342 Already in Use"
+            alert.informativeText = "A PhotoPrism server (or another application) is already running on port 2342.\n\nWhat would you like to do?"
+            alert.alertStyle = .warning
+
+            alert.addButton(withTitle: "Stop Existing Process")
+            alert.addButton(withTitle: "Open Existing Server")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+
+            switch response {
+            case .alertFirstButtonReturn: // Stop Existing Process
+                if killExistingPhotoprismProcesses() {
+                    // Wait a bit more to ensure port is freed
+                    Thread.sleep(forTimeInterval: 1.0)
+
+                    // Verify port is now free
+                    if isPortInUse(2342) {
+                        showAlert(title: "Failed to Free Port", message: "Could not stop the existing process on port 2342.\n\nPlease stop it manually:\n\nsudo lsof -ti:2342 | xargs kill -9")
+                        return
+                    }
+                    // Continue to start server below
+                } else {
+                    showAlert(title: "Failed to Stop Process", message: "Could not stop existing PhotoPrism processes.\n\nTry manually:\n\npkill -f photoprism")
+                    return
+                }
+
+            case .alertSecondButtonReturn: // Open Existing Server
+                openWebUI()
+                return
+
+            default: // Cancel
+                return
+            }
+        }
+
         // Refresh directories in case preferences changed
         createDirectories()
-        
+
         guard let serverPath = getServerBinaryPath(),
               FileManager.default.fileExists(atPath: serverPath.path) else {
             showAlert(title: "Error", message: "PhotoPrism server binary not found.\n\nExpected at: \(getServerBinaryPath()?.path ?? "unknown")")
@@ -759,25 +876,90 @@ class PhotoPrismViewController: NSViewController {
     
 func stopServer() {
     guard isServerRunning, let process = serverProcess else { return }
-    
-    // Try graceful shutdown first using photoprism stop command
+
+    // Strategy 1: Try graceful shutdown using photoprism stop command
     if let serverPath = getServerBinaryPath() {
         let stopProcess = Process()
         stopProcess.executableURL = serverPath
         stopProcess.arguments = ["stop"]
         stopProcess.environment = process.environment
+
+        // Suppress output
+        let pipe = Pipe()
+        stopProcess.standardOutput = pipe
+        stopProcess.standardError = pipe
+
         try? stopProcess.run()
         stopProcess.waitUntilExit()
+
+        // Wait a moment for graceful shutdown
+        Thread.sleep(forTimeInterval: 1.0)
     }
-    
-    // If still running, force terminate
+
+    // Strategy 2: Terminate the process tree (SIGTERM)
     if process.isRunning {
+        // Get process group and terminate all child processes
+        let pid = process.processIdentifier
+
+        // Kill process group (includes children)
+        let killPG = Process()
+        killPG.executableURL = URL(fileURLWithPath: "/bin/sh")
+        killPG.arguments = ["-c", "kill -TERM -\(pid) 2>/dev/null || kill \(pid) 2>/dev/null"]
+        try? killPG.run()
+        killPG.waitUntilExit()
+
+        // Also try built-in terminate
         process.terminate()
+
+        // Wait for graceful termination
+        Thread.sleep(forTimeInterval: 1.0)
     }
-    
+
+    // Strategy 3: Force kill if still running (SIGKILL)
+    if process.isRunning {
+        let pid = process.processIdentifier
+
+        // Force kill process group
+        let forceKill = Process()
+        forceKill.executableURL = URL(fileURLWithPath: "/bin/sh")
+        forceKill.arguments = ["-c", "kill -9 -\(pid) 2>/dev/null || kill -9 \(pid) 2>/dev/null"]
+        try? forceKill.run()
+        forceKill.waitUntilExit()
+
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    // Strategy 4: Nuclear option - kill all photoprism processes
+    if isPortInUse(2342) {
+        // Kill by port
+        let portKill = Process()
+        portKill.executableURL = URL(fileURLWithPath: "/bin/sh")
+        portKill.arguments = ["-c", "lsof -ti :2342 | xargs kill -9 2>/dev/null"]
+        try? portKill.run()
+        portKill.waitUntilExit()
+
+        // Kill by name
+        let nameKill = Process()
+        nameKill.executableURL = URL(fileURLWithPath: "/bin/sh")
+        nameKill.arguments = ["-c", "pkill -9 -i photoprism 2>/dev/null"]
+        try? nameKill.run()
+        nameKill.waitUntilExit()
+    }
+
     isServerRunning = false
     serverProcess = nil
     updateUI()
+
+    // Log the shutdown
+    let logFile = logPath.appendingPathComponent("photoprism.log")
+    if let fileHandle = try? FileHandle(forWritingTo: logFile) {
+        fileHandle.seekToEndOfFile()
+        let shutdownMessage = "[\(Date())] === PhotoPrism Server Stopped ===\n\n"
+        if let data = shutdownMessage.data(using: .utf8) {
+            fileHandle.write(data)
+        }
+        try? fileHandle.close()
+    }
 }
     
     @objc private func toggleServer() {
