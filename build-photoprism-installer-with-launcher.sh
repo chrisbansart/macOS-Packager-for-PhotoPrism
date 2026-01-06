@@ -261,29 +261,18 @@ mkdir -p "$TEMP_DIR" "$DIST_DIR"
 cd "$TEMP_DIR"
 
 ### --------------------------------------------------------------------
-### Download PhotoPrism icon (SVG -> PNG)
+### Generate app icons from Xcode assets
 ### --------------------------------------------------------------------
 
-echo ">> Downloading PhotoPrism icon..."
-ICON_SVG="$TEMP_DIR/photoprism_logo.svg"
-ICON_PNG="$TEMP_DIR/photoprism_icon_1024.png"
+echo ">> Generating app icons..."
+GENERATE_ICONS_SCRIPT="$SCRIPT_DIR/generate-icons.sh"
 
-if [[ ! -f "$ICON_PNG" ]]; then
-  if curl -fsSL "https://dl.photoprism.app/img/logo/logo.svg" -o "$ICON_SVG" 2>/dev/null; then
-    echo "   SVG logo downloaded"
-    if command -v rsvg-convert &>/dev/null; then
-      rsvg-convert -w 1024 -h 1024 "$ICON_SVG" -o "$ICON_PNG"
-      echo "   Converted with rsvg-convert"
-    elif command -v qlmanage &>/dev/null; then
-      qlmanage -t -s 1024 -o "$TEMP_DIR" "$ICON_SVG" 2>/dev/null || true
-      [[ -f "$TEMP_DIR/photoprism_logo.svg.png" ]] && mv "$TEMP_DIR/photoprism_logo.svg.png" "$ICON_PNG"
-    elif command -v convert &>/dev/null; then
-      convert -background none -density 300 -resize 1024x1024 "$ICON_SVG" "$ICON_PNG"
-    else
-      echo "!! No SVG conversion tool available."
-      ICON_PNG=""
-    fi
-  fi
+if [[ -f "$GENERATE_ICONS_SCRIPT" ]]; then
+  echo "   Running generate-icons.sh..."
+  bash "$GENERATE_ICONS_SCRIPT"
+else
+  echo "!! generate-icons.sh not found at $GENERATE_ICONS_SCRIPT"
+  echo "   Icons may not be up to date."
 fi
 
 ### --------------------------------------------------------------------
@@ -545,27 +534,30 @@ fi
 cp "$TF_LIB"/libtensorflow*.dylib "$APP_FRAMEWORKS/"
 
 ### --------------------------------------------------------------------
-### Generate .icns icon
+### Copy .icns icon from Xcode assets
 ### --------------------------------------------------------------------
 
-if [[ -n "$ICON_PNG" && -f "$ICON_PNG" ]]; then
-  echo ">> Generating icon..."
-  ICONSET="$TEMP_DIR/AppIcon.iconset"
-  rm -rf "$ICONSET" && mkdir -p "$ICONSET"
-  
-  sips -z 16 16 "$ICON_PNG" --out "$ICONSET/icon_16x16.png" >/dev/null
-  sips -z 32 32 "$ICON_PNG" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
-  sips -z 32 32 "$ICON_PNG" --out "$ICONSET/icon_32x32.png" >/dev/null
-  sips -z 64 64 "$ICON_PNG" --out "$ICONSET/icon_32x32@2x.png" >/dev/null
-  sips -z 128 128 "$ICON_PNG" --out "$ICONSET/icon_128x128.png" >/dev/null
-  sips -z 256 256 "$ICON_PNG" --out "$ICONSET/icon_128x128@2x.png" >/dev/null
-  sips -z 256 256 "$ICON_PNG" --out "$ICONSET/icon_256x256.png" >/dev/null
-  sips -z 512 512 "$ICON_PNG" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
-  sips -z 512 512 "$ICON_PNG" --out "$ICONSET/icon_512x512.png" >/dev/null
-  sips -z 1024 1024 "$ICON_PNG" --out "$ICONSET/icon_512x512@2x.png" >/dev/null
-  
-  iconutil -c icns "$ICONSET" -o "$APP_RESOURCES/AppIcon.icns"
-  rm -rf "$ICONSET"
+echo ">> Copying app icon..."
+XCODE_ICONSET="$LAUNCHER_SRC/Assets.xcassets/AppIcon.appiconset"
+
+if [[ -d "$XCODE_ICONSET" ]]; then
+  # Generate .icns from Xcode asset catalog
+  ICONSET_TEMP="$TEMP_DIR/AppIcon.iconset"
+  rm -rf "$ICONSET_TEMP" && mkdir -p "$ICONSET_TEMP"
+
+  # Copy all icon files from Xcode assets
+  cp "$XCODE_ICONSET"/*.png "$ICONSET_TEMP/" 2>/dev/null || true
+
+  if ls "$ICONSET_TEMP"/*.png >/dev/null 2>&1; then
+    iconutil -c icns "$ICONSET_TEMP" -o "$APP_RESOURCES/AppIcon.icns"
+    rm -rf "$ICONSET_TEMP"
+    echo "   App icon generated from Xcode assets"
+  else
+    echo "!! No PNG files found in $XCODE_ICONSET"
+  fi
+else
+  echo "!! Xcode iconset not found at $XCODE_ICONSET"
+  echo "   Run generate-icons.sh first to create icons"
 fi
 
 ### --------------------------------------------------------------------

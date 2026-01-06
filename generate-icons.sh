@@ -30,60 +30,28 @@ ASSETS_DIR="$SCRIPT_DIR/PhotoPrismLauncher/Assets.xcassets"
 APPICON_DIR="$ASSETS_DIR/AppIcon.appiconset"
 STATUSBAR_DIR="$ASSETS_DIR/StatusBarIcon.imageset"
 
-# URL du logo PhotoPrism officiel (SVG)
-LOGO_SVG_URL="https://dl.photoprism.app/img/logo/logo.svg"
+# URL du logo PhotoPrism officiel
+# SVG disponible à: https://dl.photoprism.app/img/logo/logo.svg
+LOGO_URL="https://dl.photoprism.app/icons/app/1024.png"
 
 echo ">> Création des dossiers..."
 mkdir -p "$APPICON_DIR"
 mkdir -p "$STATUSBAR_DIR"
 
-# Téléchargement du logo SVG
-TEMP_SVG="/tmp/photoprism_logo.svg"
+# Téléchargement du logo PNG
 TEMP_LOGO="/tmp/photoprism_logo_1024.png"
 
-echo ">> Téléchargement du logo PhotoPrism (SVG)..."
-if curl -fsSL "$LOGO_SVG_URL" -o "$TEMP_SVG" 2>/dev/null; then
-    echo "   Logo SVG téléchargé depuis $LOGO_SVG_URL"
+echo ">> Téléchargement du logo PhotoPrism (PNG 1024x1024)..."
+if curl -fsSL "$LOGO_URL" -o "$TEMP_LOGO" 2>/dev/null; then
+    echo "   Logo téléchargé depuis $LOGO_URL"
 else
-    echo "!! Impossible de télécharger le logo SVG."
+    echo "!! Impossible de télécharger le logo."
     exit 1
 fi
 
-# Conversion SVG -> PNG (1024x1024)
-echo ">> Conversion SVG -> PNG..."
-
-if command -v rsvg-convert &>/dev/null; then
-    # Méthode 1: rsvg-convert (librsvg, via Homebrew: brew install librsvg)
-    rsvg-convert -w 1024 -h 1024 "$TEMP_SVG" -o "$TEMP_LOGO"
-    echo "   Converti avec rsvg-convert"
-elif command -v qlmanage &>/dev/null; then
-    # Méthode 2: qlmanage (macOS built-in, Quick Look)
-    # Note: qlmanage peut avoir des limitations avec certains SVG
-    qlmanage -t -s 1024 -o /tmp "$TEMP_SVG" 2>/dev/null
-    # qlmanage crée un fichier avec extension .png ajoutée au nom original
-    if [[ -f "/tmp/photoprism_logo.svg.png" ]]; then
-        mv "/tmp/photoprism_logo.svg.png" "$TEMP_LOGO"
-        echo "   Converti avec qlmanage"
-    else
-        echo "!! qlmanage n'a pas pu convertir le SVG"
-        echo "   Installez librsvg: brew install librsvg"
-        exit 1
-    fi
-elif command -v convert &>/dev/null; then
-    # Méthode 3: ImageMagick
-    convert -background none -density 300 -resize 1024x1024 "$TEMP_SVG" "$TEMP_LOGO"
-    echo "   Converti avec ImageMagick"
-else
-    echo "!! Aucun outil de conversion SVG trouvé."
-    echo "   Installez l'un des outils suivants:"
-    echo "     - librsvg: brew install librsvg"
-    echo "     - ImageMagick: brew install imagemagick"
-    exit 1
-fi
-
-# Vérifier que la conversion a réussi
+# Vérifier que le téléchargement a réussi
 if [[ ! -f "$TEMP_LOGO" ]]; then
-    echo "!! Échec de la conversion SVG -> PNG"
+    echo "!! Échec du téléchargement"
     exit 1
 fi
 
@@ -137,4 +105,4 @@ echo "  - $APPICON_DIR"
 echo "  - $STATUSBAR_DIR"
 
 # Nettoyage
-rm -f "$TEMP_LOGO" "$TEMP_SVG"
+rm -f "$TEMP_LOGO"
