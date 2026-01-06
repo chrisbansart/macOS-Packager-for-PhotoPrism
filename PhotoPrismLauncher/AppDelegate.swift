@@ -821,6 +821,11 @@ class PhotoPrismViewController: NSViewController {
         environment["PHOTOPRISM_ADMIN_USER"] = "admin"
         environment["PHOTOPRISM_ADMIN_PASSWORD"] = "photoprism"
 
+        // Production mode settings
+        environment["GIN_MODE"] = "release"
+        environment["PHOTOPRISM_LOG_LEVEL"] = "info"
+        environment["PHOTOPRISM_DEBUG"] = "false"
+
         if let frameworksPath = getFrameworksPath() {
             let existingPath = environment["DYLD_LIBRARY_PATH"] ?? ""
             environment["DYLD_LIBRARY_PATH"] = frameworksPath.path + (existingPath.isEmpty ? "" : ":\(existingPath)")
